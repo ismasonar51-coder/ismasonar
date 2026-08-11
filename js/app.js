@@ -1,6 +1,6 @@
 // =====================================================================
-// ISMASONAR — Logique de l'accueil, création/jonction de salon, lobby
-// Phase 1 : structure + Firebase + lobby temps réel
+// ISMASONAR — Logique complète : lobby, musiques, manches, débat, vote
+// Phase 2b : logique de jeu (lecture, débat, vote) — scoring à venir
 // =====================================================================
 
 import { firebaseConfig } from "./firebase-config.js";
@@ -14,17 +14,21 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // ---------- État local ----------
-let sameRoomValue = true;   // true = tous dans la même pièce
-let modeValue = "rounds";   // "rounds" ou "time"
+let sameRoomValue = true;
+let modeValue = "rounds";
 let unsubscribePlayers = null;
+let unsubscribeRoom = null;
+let unsubscribeChat = null;
 let currentRoomCode = null;
 let currentPlayerId = null;
 let hostPlays = true;
+let currentPlayersCache = [];
+let currentRoundIndexCache = 0;
+let lastRenderedPhase = null; // évite de ré-initialiser une vue à chaque micro-mise à jour Firestore
 const pendingSongs = { host: [null, null], player: [null, null] };
 const MIN_PLAYERS = 3; // ajustable selon tes tests
 
-// ---------- État lié aux manches ----------
-let unsubscribeRoom = null;
+// ---------- Minuteurs & audio ----------
 let roundTimerInterval = null;
 let ytPlayer = null;
 let audioUnlocked = false;
@@ -32,10 +36,7 @@ let ytApiReadyResolve;
 const ytApiReadyPromise = new Promise(resolve => { ytApiReadyResolve = resolve; });
 
 function loadYouTubeAPI(){
-  if(window.YT && window.YT.Player){
-    ytApiReadyResolve();
-    return;
-  }
+  if(window.YT && window.YT.Player){ ytApiReadyResolve(); return; }
   const tag = document.createElement("script");
   tag.src = "https://www.youtube.com/iframe_api";
   document.head.appendChild(tag);
@@ -115,7 +116,6 @@ async function handleCreateRoom(event){
       createdAt: serverTimestamp()
     });
 
-    // Le host apparaît aussi dans la liste des joueurs
     const playerRef = await addDoc(collection(db, "rooms", code, "players"), {
       name: hostName,
       isHost: true,
@@ -164,7 +164,6 @@ async function handleJoinRoom(event){
       return;
     }
 
-    // Vérifie qu'aucun joueur du salon n'a déjà ce pseudo (insensible à la casse)
     const existingPlayersSnap = await getDocs(collection(db, "rooms", code, "players"));
     const nameTaken = existingPlayersSnap.docs.some(
       p => p.data().name.trim().toLowerCase() === pseudo.toLowerCase()
@@ -206,14 +205,15 @@ function listenPlayers(code, listElementId, countElementId, isHostView){
   const countEl = document.getElementById(countElementId);
 
   unsubscribePlayers = onSnapshot(collection(db, "rooms", code, "players"), snapshot => {
+    currentPlayersCache = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
     listEl.innerHTML = "";
     countEl.textContent = `(${snapshot.size})`;
 
     let readyCount = 0;
     let totalCount = 0;
 
-    snapshot.forEach(playerDoc => {
-      const player = playerDoc.data();
+    currentPlayersCache.forEach(player => {
       totalCount++;
       const isReady = player.songsSubmitted === true;
       if(isReady) readyCount++;
@@ -225,18 +225,15 @@ function listenPlayers(code, listElementId, countElementId, isHostView){
         <span class="tags">
           ${player.isHost ? '<span class="host-tag">HOST</span>' : ""}
           ${isReady ? '<span class="ready-tag">🎵 prêt</span>' : ""}
-          ${isHostView && !player.isHost ? `<button type="button" class="kick-btn" onclick="kickPlayer('${playerDoc.id}', '${escapeHtml(player.name)}')" title="Exclure ce joueur">✕</button>` : ""}
+          ${isHostView && !player.isHost ? `<button type="button" class="kick-btn" onclick="kickPlayer('${player.id}', '${escapeHtml(player.name)}')" title="Exclure ce joueur">✕</button>` : ""}
         </span>
       `;
       listEl.appendChild(li);
     });
 
-    // Le bouton "Lancer la partie" n'existe que côté host
     const startBtn = document.getElementById("btn-start-game");
     const startHint = document.getElementById("start-hint");
     if(startBtn){
-      // On peut lancer dès que MIN_PLAYERS joueurs sont prêts, même si d'autres
-      // joueurs présents dans le salon n'ont pas encore validé leurs musiques.
       const enoughReady = readyCount >= MIN_PLAYERS;
       startBtn.disabled = !enoughReady;
 
@@ -251,7 +248,6 @@ function listenPlayers(code, listElementId, countElementId, isHostView){
   });
 }
 
-// ---------- Exclusion d'un joueur (host uniquement, avant le début) ----------
 async function kickPlayer(playerId, playerName){
   if(!confirm(`Exclure ${playerName} du salon ?`)) return;
   try{
@@ -373,13 +369,11 @@ function buildRoundOrder(readyPlayers, settings){
   let pool;
 
   if(settings.mode === "rounds" && !settings.roundsCount){
-    // Manches non précisées : 1 musique par joueur (choisie au hasard parmi ses 2)
     pool = readyPlayers.map(p => {
       const song = p.songs[Math.floor(Math.random() * p.songs.length)];
       return { playerId: p.id, youtubeId: song.youtubeId, title: song.title };
     });
   } else {
-    // Pool complet des 2 musiques de chaque joueur prêt
     pool = readyPlayers.flatMap(p =>
       p.songs.map(song => ({ playerId: p.id, youtubeId: song.youtubeId, title: song.title }))
     );
@@ -389,7 +383,7 @@ function buildRoundOrder(readyPlayers, settings){
 
   let roundsCount;
   if(settings.mode === "time"){
-    roundsCount = Math.max(1, Math.round(settings.timeMinutes)); // ≈ 1 manche par minute (30s + 30s)
+    roundsCount = Math.max(1, Math.round(settings.timeMinutes));
   } else {
     roundsCount = settings.roundsCount || pool.length;
   }
@@ -402,7 +396,7 @@ async function handleStartGame(){
   const startBtn = document.getElementById("btn-start-game");
   startBtn.disabled = true;
   startBtn.textContent = "Lancement...";
-  audioUnlocked = true; // le clic du host sert de geste utilisateur pour l'audio
+  audioUnlocked = true;
 
   try{
     const roomSnap = await getDoc(doc(db, "rooms", currentRoomCode));
@@ -414,12 +408,16 @@ async function handleStartGame(){
       .map(d => ({ id: d.id, songs: d.data().songs }));
 
     const roundOrder = buildRoundOrder(readyPlayers, settings);
+    const activePlayerIds = readyPlayers.map(p => p.id);
 
     await updateDoc(doc(db, "rooms", currentRoomCode), {
       status: "playing",
       roundOrder,
+      activePlayerIds,
       currentRoundIndex: 0,
-      roundStartedAt: serverTimestamp()
+      roundPhase: "song",
+      phaseStartedAt: serverTimestamp(),
+      votes: {}
     });
   } catch(err){
     console.error(err);
@@ -437,13 +435,31 @@ function listenRoomStatus(code, isHost, sameRoom){
     const room = snap.data();
     if(!room) return;
     if(room.status === "playing"){
-      enterRoundView(room, isHost, sameRoom);
+      currentRoundIndexCache = room.currentRoundIndex;
+      renderRoundState(room, isHost, sameRoom);
     }
   });
 }
 
-// ---------- Affichage d'une manche ----------
-function enterRoundView(room, isHost, sameRoom){
+// ---------- Dispatcher d'affichage selon la phase de la manche ----------
+function renderRoundState(room, isHost, sameRoom){
+  const phaseKey = `${room.currentRoundIndex}-${room.roundPhase}`;
+  const isNewPhase = phaseKey !== lastRenderedPhase;
+  lastRenderedPhase = phaseKey;
+
+  if(room.roundPhase === "song"){
+    if(isNewPhase) enterSongPhase(room, isHost, sameRoom);
+  } else if(room.roundPhase === "debate"){
+    if(isNewPhase) enterDebatePhase(room, isHost, sameRoom);
+  } else if(room.roundPhase === "voting"){
+    renderVotingPhase(room, isHost);
+  } else if(room.roundPhase === "results"){
+    if(isNewPhase) enterResultsPlaceholder(room);
+  }
+}
+
+// ---------- Phase 1 : lecture de la musique ----------
+function enterSongPhase(room, isHost, sameRoom){
   showView("view-round");
 
   const round = room.roundOrder[room.currentRoundIndex];
@@ -455,12 +471,16 @@ function enterRoundView(room, isHost, sameRoom){
   const playerCaption = document.getElementById("round-audio-player");
   const unlockBtn = document.getElementById("round-unlock-btn");
 
+  const onTimerEnd = () => {
+    if(ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+    if(isHost) advanceToDebate();
+  };
+
   if(sameRoom && !isHost){
-    // Même pièce : seul le host diffuse, les autres suivent juste le minuteur
     hostOnlyCaption.classList.remove("hidden");
     playerCaption.classList.add("hidden");
     unlockBtn.classList.add("hidden");
-    startCountdown(room.roundStartedAt);
+    startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
   } else {
     hostOnlyCaption.classList.add("hidden");
     playerCaption.classList.remove("hidden");
@@ -471,14 +491,167 @@ function enterRoundView(room, isHost, sameRoom){
         audioUnlocked = true;
         unlockBtn.classList.add("hidden");
         playRoundSong(round.youtubeId);
-        startCountdown(room.roundStartedAt);
+        startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
       };
     } else {
       unlockBtn.classList.add("hidden");
       playRoundSong(round.youtubeId);
-      startCountdown(room.roundStartedAt);
+      startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
     }
   }
+}
+
+async function advanceToDebate(){
+  try{
+    await updateDoc(doc(db, "rooms", currentRoomCode), {
+      roundPhase: "debate",
+      phaseStartedAt: serverTimestamp()
+    });
+  } catch(err){ console.error(err); }
+}
+
+// ---------- Phase 2 : débat ----------
+function enterDebatePhase(room, isHost, sameRoom){
+  showView("view-debate");
+  document.getElementById("debate-progress").textContent =
+    `Manche ${room.currentRoundIndex + 1} / ${room.roundOrder.length} — Débat`;
+
+  const chatBlock = document.getElementById("debate-chat-block");
+  if(!sameRoom){
+    chatBlock.classList.remove("hidden");
+    listenChat(room.currentRoundIndex);
+  } else {
+    chatBlock.classList.add("hidden");
+    if(unsubscribeChat) unsubscribeChat();
+  }
+
+  startCountdown(room.phaseStartedAt, "debate-countdown", () => {
+    if(isHost) advanceToVoting();
+  });
+}
+
+async function advanceToVoting(){
+  try{
+    await updateDoc(doc(db, "rooms", currentRoomCode), {
+      roundPhase: "voting",
+      phaseStartedAt: serverTimestamp()
+    });
+  } catch(err){ console.error(err); }
+}
+
+// ---------- Chat texte (mode à distance uniquement) ----------
+function listenChat(roundIndex){
+  if(unsubscribeChat) unsubscribeChat();
+  const chatEl = document.getElementById("chat-messages");
+  chatEl.innerHTML = "";
+
+  unsubscribeChat = onSnapshot(collection(db, "rooms", currentRoomCode, "chat"), snapshot => {
+    const messages = snapshot.docs
+      .map(d => d.data())
+      .filter(m => m.roundIndex === roundIndex)
+      .sort((a, b) => (a.sentAt?.toMillis?.() || 0) - (b.sentAt?.toMillis?.() || 0));
+
+    chatEl.innerHTML = messages.map(m => `
+      <li><strong>${escapeHtml(m.name)}:</strong> ${escapeHtml(m.text)}</li>
+    `).join("");
+    chatEl.scrollTop = chatEl.scrollHeight;
+  });
+}
+
+async function sendChatMessage(event){
+  event.preventDefault();
+  const input = document.getElementById("chat-input");
+  const text = input.value.trim();
+  if(!text) return;
+
+  const me = currentPlayersCache.find(p => p.id === currentPlayerId);
+  input.value = "";
+
+  try{
+    await addDoc(collection(db, "rooms", currentRoomCode, "chat"), {
+      name: me ? me.name : "?",
+      text,
+      roundIndex: currentRoundIndexCache,
+      sentAt: serverTimestamp()
+    });
+  } catch(err){ console.error(err); }
+}
+window.sendChatMessage = sendChatMessage;
+
+// ---------- Phase 3 : vote ----------
+function renderVotingPhase(room, isHost){
+  showView("view-voting");
+  document.getElementById("voting-progress").textContent =
+    `Manche ${room.currentRoundIndex + 1} / ${room.roundOrder.length} — Vote`;
+
+  const votes = room.votes || {};
+  const myVote = votes[currentPlayerId];
+  const listEl = document.getElementById("vote-list");
+  const statusEl = document.getElementById("voting-status");
+
+  const votedCount = Object.keys(votes).length;
+  const totalActive = room.activePlayerIds.length;
+
+  if(myVote){
+    listEl.innerHTML = "";
+    statusEl.textContent = `✓ Vote enregistré. En attente des autres joueurs... (${votedCount}/${totalActive})`;
+  } else {
+    listEl.innerHTML = currentPlayersCache
+      .filter(p => p.id !== currentPlayerId && room.activePlayerIds.includes(p.id))
+      .map(p => `<li class="vote-card" onclick="submitVote('${p.id}')">${escapeHtml(p.name)}</li>`)
+      .join("");
+    statusEl.textContent = `Choisis qui, selon toi, a proposé cette musique. (${votedCount}/${totalActive})`;
+  }
+
+  if(isHost && votedCount >= totalActive && room.roundPhase === "voting"){
+    advanceToResultsPlaceholder();
+  }
+}
+
+async function submitVote(votedForId){
+  try{
+    await updateDoc(doc(db, "rooms", currentRoomCode), {
+      [`votes.${currentPlayerId}`]: votedForId
+    });
+  } catch(err){
+    console.error(err);
+    alert("Erreur lors du vote, réessaie.");
+  }
+}
+window.submitVote = submitVote;
+
+async function advanceToResultsPlaceholder(){
+  try{
+    await updateDoc(doc(db, "rooms", currentRoomCode), { roundPhase: "results" });
+  } catch(err){ console.error(err); }
+}
+
+// ---------- Phase 4 : résultats (placeholder, calcul des scores à venir) ----------
+function enterResultsPlaceholder(){
+  showView("view-voting");
+  document.getElementById("vote-list").innerHTML = "";
+  document.getElementById("voting-status").textContent =
+    "🚧 Tous les votes sont reçus ! Le calcul des scores et l'écran de résultats arrivent dans la prochaine étape.";
+}
+
+// ---------- Minuteur générique (30s) ----------
+function startCountdown(startTimestamp, elementId, onExpire){
+  clearInterval(roundTimerInterval);
+  const startMs = startTimestamp && startTimestamp.toMillis ? startTimestamp.toMillis() : Date.now();
+  const countdownEl = document.getElementById(elementId);
+  let expired = false;
+
+  roundTimerInterval = setInterval(() => {
+    const elapsed = (Date.now() - startMs) / 1000;
+    const remaining = Math.max(0, Math.ceil(30 - elapsed));
+    countdownEl.textContent = remaining;
+
+    if(remaining <= 0 && !expired){
+      expired = true;
+      clearInterval(roundTimerInterval);
+      onExpire();
+    }
+  }, 250);
 }
 
 // ---------- Lecture audio (vidéo cachée, YouTube IFrame API) ----------
@@ -495,25 +668,6 @@ async function playRoundSong(videoId){
     playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0 },
     events: { onReady: e => e.target.playVideo() }
   });
-}
-
-// ---------- Minuteur de 30s ----------
-function startCountdown(startTimestamp){
-  clearInterval(roundTimerInterval);
-  const startMs = startTimestamp && startTimestamp.toMillis ? startTimestamp.toMillis() : Date.now();
-  const countdownEl = document.getElementById("round-countdown");
-
-  roundTimerInterval = setInterval(() => {
-    const elapsed = (Date.now() - startMs) / 1000;
-    const remaining = Math.max(0, Math.ceil(30 - elapsed));
-    countdownEl.textContent = remaining;
-
-    if(remaining <= 0){
-      clearInterval(roundTimerInterval);
-      if(ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-      document.getElementById("round-ended-message").classList.remove("hidden");
-    }
-  }, 250);
 }
 
 // ---------- QR Code ----------
