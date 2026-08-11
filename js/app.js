@@ -6,8 +6,8 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, doc, setDoc, getDoc, updateDoc,
-  collection, addDoc, onSnapshot, serverTimestamp
+  getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc,
+  collection, addDoc, getDocs, onSnapshot, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
@@ -111,7 +111,7 @@ async function handleCreateRoom(event){
 
     document.getElementById("display-room-code").textContent = code;
     generateQRCode(code);
-    listenPlayers(code, "host-player-list", "player-count");
+    listenPlayers(code, "host-player-list", "player-count", true);
     showView("view-host-lobby");
   } catch(err){
     console.error(err);
@@ -143,6 +143,16 @@ async function handleJoinRoom(event){
       return;
     }
 
+    // Vérifie qu'aucun joueur du salon n'a déjà ce pseudo (insensible à la casse)
+    const existingPlayersSnap = await getDocs(collection(db, "rooms", code, "players"));
+    const nameTaken = existingPlayersSnap.docs.some(
+      p => p.data().name.trim().toLowerCase() === pseudo.toLowerCase()
+    );
+    if(nameTaken){
+      errorEl.textContent = "Ce pseudo est déjà pris dans ce salon, choisis-en un autre.";
+      return;
+    }
+
     const playerRef = await addDoc(collection(db, "rooms", code, "players"), {
       name: pseudo,
       isHost: false,
@@ -157,7 +167,7 @@ async function handleJoinRoom(event){
     currentPlayerId = playerRef.id;
 
     document.getElementById("display-join-code").textContent = code;
-    listenPlayers(code, "player-player-list", "player-count-2");
+    listenPlayers(code, "player-player-list", "player-count-2", false);
     showView("view-player-lobby");
   } catch(err){
     console.error(err);
@@ -167,7 +177,7 @@ async function handleJoinRoom(event){
 window.handleJoinRoom = handleJoinRoom;
 
 // ---------- Liste des joueurs en temps réel ----------
-function listenPlayers(code, listElementId, countElementId){
+function listenPlayers(code, listElementId, countElementId, isHostView){
   if(unsubscribePlayers) unsubscribePlayers();
 
   const listEl = document.getElementById(listElementId);
@@ -193,6 +203,7 @@ function listenPlayers(code, listElementId, countElementId){
         <span class="tags">
           ${player.isHost ? '<span class="host-tag">HOST</span>' : ""}
           ${isReady ? '<span class="ready-tag">🎵 prêt</span>' : ""}
+          ${isHostView && !player.isHost ? `<button type="button" class="kick-btn" onclick="kickPlayer('${playerDoc.id}', '${escapeHtml(player.name)}')" title="Exclure ce joueur">✕</button>` : ""}
         </span>
       `;
       listEl.appendChild(li);
@@ -202,20 +213,33 @@ function listenPlayers(code, listElementId, countElementId){
     const startBtn = document.getElementById("btn-start-game");
     const startHint = document.getElementById("start-hint");
     if(startBtn){
-      const allReady = totalCount > 0 && readyCount === totalCount;
-      const enoughPlayers = totalCount >= MIN_PLAYERS;
-      startBtn.disabled = !(allReady && enoughPlayers);
+      // On peut lancer dès que MIN_PLAYERS joueurs sont prêts, même si d'autres
+      // joueurs présents dans le salon n'ont pas encore validé leurs musiques.
+      const enoughReady = readyCount >= MIN_PLAYERS;
+      startBtn.disabled = !enoughReady;
 
-      if(!enoughPlayers){
-        startHint.textContent = `Il faut au moins ${MIN_PLAYERS} joueurs (${totalCount}/${MIN_PLAYERS}).`;
-      } else if(!allReady){
-        startHint.textContent = `En attente des musiques : ${readyCount}/${totalCount} prêts.`;
-      } else {
+      if(!enoughReady){
+        startHint.textContent = `En attente des musiques : ${readyCount}/${MIN_PLAYERS} prêts minimum.`;
+      } else if(readyCount === totalCount){
         startHint.textContent = "Tout le monde est prêt !";
+      } else {
+        startHint.textContent = `${readyCount}/${totalCount} joueurs prêts — tu peux lancer, ou attendre les autres.`;
       }
     }
   });
 }
+
+// ---------- Exclusion d'un joueur (host uniquement, avant le début) ----------
+async function kickPlayer(playerId, playerName){
+  if(!confirm(`Exclure ${playerName} du salon ?`)) return;
+  try{
+    await deleteDoc(doc(db, "rooms", currentRoomCode, "players", playerId));
+  } catch(err){
+    console.error(err);
+    alert("Impossible d'exclure ce joueur, réessaie.");
+  }
+}
+window.kickPlayer = kickPlayer;
 
 function escapeHtml(str){
   const div = document.createElement("div");
