@@ -256,6 +256,24 @@ input:focus, select:focus{ outline: none; border-color: var(--violet); }
   padding: 2px 6px;
   border-radius: 4px;
 }
+.player-list li .kick-btn{
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.player-list li .kick-btn:hover{
+  border-color: var(--danger);
+  color: var(--danger);
+}
 .player-list li .dot.pending{ background: var(--text-faint); }
 
 /* ---------- Soumission des musiques ---------- */
