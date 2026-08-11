@@ -23,6 +23,26 @@ let hostPlays = true;
 const pendingSongs = { host: [null, null], player: [null, null] };
 const MIN_PLAYERS = 3; // ajustable selon tes tests
 
+// ---------- État lié aux manches ----------
+let unsubscribeRoom = null;
+let roundTimerInterval = null;
+let ytPlayer = null;
+let audioUnlocked = false;
+let ytApiReadyResolve;
+const ytApiReadyPromise = new Promise(resolve => { ytApiReadyResolve = resolve; });
+
+function loadYouTubeAPI(){
+  if(window.YT && window.YT.Player){
+    ytApiReadyResolve();
+    return;
+  }
+  const tag = document.createElement("script");
+  tag.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(tag);
+  window.onYouTubeIframeAPIReady = () => ytApiReadyResolve();
+}
+loadYouTubeAPI();
+
 // ---------- Navigation entre vues ----------
 function showView(id){
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
@@ -112,6 +132,7 @@ async function handleCreateRoom(event){
     document.getElementById("display-room-code").textContent = code;
     generateQRCode(code);
     listenPlayers(code, "host-player-list", "player-count", true);
+    listenRoomStatus(code, true, sameRoomValue);
     showView("view-host-lobby");
   } catch(err){
     console.error(err);
@@ -168,6 +189,7 @@ async function handleJoinRoom(event){
 
     document.getElementById("display-join-code").textContent = code;
     listenPlayers(code, "player-player-list", "player-count-2", false);
+    listenRoomStatus(code, false, roomSnap.data().settings.sameRoom);
     showView("view-player-lobby");
   } catch(err){
     console.error(err);
@@ -338,11 +360,161 @@ async function submitSongs(role){
 }
 window.submitSongs = submitSongs;
 
-// ---------- Lancement de partie (placeholder, phase 2b) ----------
-function handleStartGame(){
-  alert("Bravo, tout le monde est prêt ! La logique de la partie (lecture des musiques, débat, vote, score) arrive dans la prochaine étape 🎶");
+// ---------- Sélection des musiques pour la partie ----------
+function shuffle(array){
+  for(let i = array.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+function buildRoundOrder(readyPlayers, settings){
+  let pool;
+
+  if(settings.mode === "rounds" && !settings.roundsCount){
+    // Manches non précisées : 1 musique par joueur (choisie au hasard parmi ses 2)
+    pool = readyPlayers.map(p => {
+      const song = p.songs[Math.floor(Math.random() * p.songs.length)];
+      return { playerId: p.id, youtubeId: song.youtubeId, title: song.title };
+    });
+  } else {
+    // Pool complet des 2 musiques de chaque joueur prêt
+    pool = readyPlayers.flatMap(p =>
+      p.songs.map(song => ({ playerId: p.id, youtubeId: song.youtubeId, title: song.title }))
+    );
+  }
+
+  shuffle(pool);
+
+  let roundsCount;
+  if(settings.mode === "time"){
+    roundsCount = Math.max(1, Math.round(settings.timeMinutes)); // ≈ 1 manche par minute (30s + 30s)
+  } else {
+    roundsCount = settings.roundsCount || pool.length;
+  }
+
+  return pool.slice(0, Math.min(roundsCount, pool.length));
+}
+
+// ---------- Lancement de la partie ----------
+async function handleStartGame(){
+  const startBtn = document.getElementById("btn-start-game");
+  startBtn.disabled = true;
+  startBtn.textContent = "Lancement...";
+  audioUnlocked = true; // le clic du host sert de geste utilisateur pour l'audio
+
+  try{
+    const roomSnap = await getDoc(doc(db, "rooms", currentRoomCode));
+    const settings = roomSnap.data().settings;
+
+    const playersSnap = await getDocs(collection(db, "rooms", currentRoomCode, "players"));
+    const readyPlayers = playersSnap.docs
+      .filter(d => d.data().songsSubmitted)
+      .map(d => ({ id: d.id, songs: d.data().songs }));
+
+    const roundOrder = buildRoundOrder(readyPlayers, settings);
+
+    await updateDoc(doc(db, "rooms", currentRoomCode), {
+      status: "playing",
+      roundOrder,
+      currentRoundIndex: 0,
+      roundStartedAt: serverTimestamp()
+    });
+  } catch(err){
+    console.error(err);
+    alert("Erreur au lancement de la partie, réessaie.");
+    startBtn.disabled = false;
+    startBtn.textContent = "Lancer la partie";
+  }
 }
 window.handleStartGame = handleStartGame;
+
+// ---------- Suivi de l'état de la partie (room) ----------
+function listenRoomStatus(code, isHost, sameRoom){
+  if(unsubscribeRoom) unsubscribeRoom();
+  unsubscribeRoom = onSnapshot(doc(db, "rooms", code), snap => {
+    const room = snap.data();
+    if(!room) return;
+    if(room.status === "playing"){
+      enterRoundView(room, isHost, sameRoom);
+    }
+  });
+}
+
+// ---------- Affichage d'une manche ----------
+function enterRoundView(room, isHost, sameRoom){
+  showView("view-round");
+
+  const round = room.roundOrder[room.currentRoundIndex];
+  document.getElementById("round-progress").textContent =
+    `Manche ${room.currentRoundIndex + 1} / ${room.roundOrder.length}`;
+  document.getElementById("round-ended-message").classList.add("hidden");
+
+  const hostOnlyCaption = document.getElementById("round-audio-host-only");
+  const playerCaption = document.getElementById("round-audio-player");
+  const unlockBtn = document.getElementById("round-unlock-btn");
+
+  if(sameRoom && !isHost){
+    // Même pièce : seul le host diffuse, les autres suivent juste le minuteur
+    hostOnlyCaption.classList.remove("hidden");
+    playerCaption.classList.add("hidden");
+    unlockBtn.classList.add("hidden");
+    startCountdown(room.roundStartedAt);
+  } else {
+    hostOnlyCaption.classList.add("hidden");
+    playerCaption.classList.remove("hidden");
+
+    if(!audioUnlocked){
+      unlockBtn.classList.remove("hidden");
+      unlockBtn.onclick = () => {
+        audioUnlocked = true;
+        unlockBtn.classList.add("hidden");
+        playRoundSong(round.youtubeId);
+        startCountdown(room.roundStartedAt);
+      };
+    } else {
+      unlockBtn.classList.add("hidden");
+      playRoundSong(round.youtubeId);
+      startCountdown(room.roundStartedAt);
+    }
+  }
+}
+
+// ---------- Lecture audio (vidéo cachée, YouTube IFrame API) ----------
+async function playRoundSong(videoId){
+  await ytApiReadyPromise;
+  if(ytPlayer){
+    ytPlayer.loadVideoById(videoId);
+    return;
+  }
+  ytPlayer = new YT.Player("yt-player-container", {
+    height: "1",
+    width: "1",
+    videoId: videoId,
+    playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0 },
+    events: { onReady: e => e.target.playVideo() }
+  });
+}
+
+// ---------- Minuteur de 30s ----------
+function startCountdown(startTimestamp){
+  clearInterval(roundTimerInterval);
+  const startMs = startTimestamp && startTimestamp.toMillis ? startTimestamp.toMillis() : Date.now();
+  const countdownEl = document.getElementById("round-countdown");
+
+  roundTimerInterval = setInterval(() => {
+    const elapsed = (Date.now() - startMs) / 1000;
+    const remaining = Math.max(0, Math.ceil(30 - elapsed));
+    countdownEl.textContent = remaining;
+
+    if(remaining <= 0){
+      clearInterval(roundTimerInterval);
+      if(ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+      document.getElementById("round-ended-message").classList.remove("hidden");
+    }
+  }, 250);
+}
 
 // ---------- QR Code ----------
 function generateQRCode(code){
