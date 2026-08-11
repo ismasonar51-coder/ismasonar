@@ -186,6 +186,30 @@
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<!-- ============================================
+     VUE 6 : MANCHE EN COURS
+     ============================================ -->
+<section id="view-round" class="view">
+  <div class="wrap round-stage">
+    <p class="waiting-label" id="round-progress">Manche 1 / 5</p>
+
+    <div class="round-visual">
+      <div class="round-pulse"></div>
+      <span class="round-countdown" id="round-countdown">30</span>
+    </div>
+
+    <p class="round-caption" id="round-audio-host-only">🎧 Le host diffuse la musique — écoutez ensemble !</p>
+    <p class="round-caption hidden" id="round-audio-player">🔊 La musique joue sur ton téléphone</p>
+
+    <button type="button" class="btn-big btn-primary hidden" id="round-unlock-btn">▶ Rejoindre l'écoute</button>
+
+    <p class="field-hint center hidden" id="round-ended-message">🚧 Manche terminée — le débat, le vote et le score arrivent dans la prochaine étape !</p>
+
+    <div id="yt-player-container" style="position:absolute; width:1px; height:1px; overflow:hidden;"></div>
+  </div>
+</section>
+
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
