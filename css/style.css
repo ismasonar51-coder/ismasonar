@@ -1,0 +1,245 @@
+:root{
+  /* Charte Isma dérivée : base dark navy habituelle + accents plus vifs pour l'ambiance jeu */
+  --bg: #0c0d18;
+  --bg-elevated: #151729;
+  --bg-card: #1b1e35;
+  --border: #2b2f4a;
+
+  --amber: #f5a623;       /* accent historique Isma */
+  --violet: #8b6cff;      /* accent "jeu / mystère" */
+  --teal: #34d1bf;        /* accent succès / confirmation */
+  --danger: #ff5c72;
+
+  --text: #f1f2f8;
+  --text-dim: #9296b3;
+  --text-faint: #565b7c;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+}
+
+*{ box-sizing: border-box; margin: 0; padding: 0; }
+
+body{
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 70% 40% at 20% 0%, rgba(139,108,255,0.14), transparent),
+    radial-gradient(ellipse 70% 40% at 80% 100%, rgba(245,166,35,0.10), transparent);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+.view{ display: none; min-height: 100vh; align-items: center; justify-content: center; padding: 32px 20px; }
+.view.active{ display: flex; }
+.wrap{ width: 100%; max-width: 420px; }
+
+/* ---------- Logo / accueil ---------- */
+.logo{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 40px;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: -0.02em;
+  margin-bottom: 10px;
+}
+.logo-isma{ color: var(--text); }
+.logo-sonar{ color: var(--amber); }
+
+.tagline{
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 15px;
+  margin-bottom: 40px;
+}
+
+.home-actions{ display: flex; flex-direction: column; gap: 14px; }
+
+/* ---------- Boutons ---------- */
+.btn-big{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 18px 24px;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  width: 100%;
+}
+.btn-big:active{ transform: scale(0.98); }
+.btn-primary{
+  background: linear-gradient(135deg, var(--amber), #ffcb6b);
+  color: #1a1200;
+}
+.btn-primary:hover{ box-shadow: 0 8px 24px rgba(245,166,35,0.25); }
+.btn-secondary{
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover{ border-color: var(--violet); }
+.btn-big:disabled{ opacity: 0.4; cursor: not-allowed; }
+.btn-icon{ font-size: 18px; }
+
+.btn-back{
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: 20px;
+}
+.btn-back:hover{ color: var(--text); }
+
+h2{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 24px;
+  margin-bottom: 24px;
+}
+
+/* ---------- Formulaires ---------- */
+.field{ display: block; margin-bottom: 20px; }
+.field-label{
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.field-hint{ font-size: 12.5px; color: var(--text-faint); margin-top: 8px; }
+.field-hint.center{ text-align: center; margin-top: 14px; }
+.field-error{ color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 18px; }
+.field.hidden{ display: none; }
+
+input[type="text"], input[type="number"], select{
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 15px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+}
+input:focus, select:focus{ outline: none; border-color: var(--violet); }
+.code-input{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+
+.toggle-group{ display: flex; gap: 8px; }
+.toggle-option{
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 12px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.toggle-option.active{
+  background: rgba(139,108,255,0.14);
+  border-color: var(--violet);
+  color: var(--violet);
+  font-weight: 600;
+}
+
+.btn-submit{ margin-top: 8px; }
+
+/* ---------- Lobby ---------- */
+.room-code-block{
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  margin-bottom: 28px;
+}
+.room-code-label{
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+.room-code{
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--amber);
+  margin-bottom: 16px;
+}
+.qrcode-container{ display: flex; justify-content: center; }
+.qrcode-container img, .qrcode-container canvas{ border-radius: 8px; background: #fff; padding: 8px; }
+
+.waiting-label{
+  text-align: center;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.room-code-small{
+  display: block;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--amber);
+  margin-bottom: 28px;
+}
+
+.players-title{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+.players-title span{ color: var(--teal); }
+
+.player-list{ list-style: none; margin-bottom: 28px; }
+.player-list li{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  font-size: 14.5px;
+}
+.player-list li .dot{
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--teal);
+  flex-shrink: 0;
+}
+.player-list li .host-tag{
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
