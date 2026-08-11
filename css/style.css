@@ -309,6 +309,63 @@ input:focus, select:focus{ outline: none; border-color: var(--violet); }
   font-size: 14px;
   margin-bottom: 20px;
 }
+
+/* ---------- Chat de débat ---------- */
+.chat-block{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  text-align: left;
+}
+.chat-messages{
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.chat-messages li{
+  font-size: 13.5px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.chat-messages li strong{ color: var(--violet); }
+.chat-form{ display: flex; gap: 8px; }
+.chat-form input{ flex: 1; padding: 10px 12px; font-size: 14px; }
+.chat-send-btn{
+  background: var(--violet);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0 16px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+/* ---------- Vote ---------- */
+.voting-title{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 19px;
+  text-align: center;
+  margin-bottom: 24px;
+}
+.vote-list{ list-style: none; margin-bottom: 16px; }
+.vote-list .vote-card{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  margin-bottom: 10px;
+  text-align: center;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.vote-list .vote-card:hover{
+  border-color: var(--violet);
+  background: rgba(139,108,255,0.1);
+  transform: translateY(-1px);
+}
 .player-list li .dot.pending{ background: var(--text-faint); }
 
 /* ---------- Soumission des musiques ---------- */
