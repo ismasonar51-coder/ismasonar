@@ -210,6 +210,44 @@
   </div>
 </section>
 
+<!-- ============================================
+     VUE 7 : DÉBAT
+     ============================================ -->
+<section id="view-debate" class="view">
+  <div class="wrap round-stage">
+    <p class="waiting-label" id="debate-progress">Manche 1 / 5 — Débat</p>
+
+    <div class="round-visual">
+      <div class="round-pulse"></div>
+      <span class="round-countdown" id="debate-countdown">30</span>
+    </div>
+
+    <p class="round-caption">💬 Débattez : qui a choisi cette musique ?</p>
+
+    <div class="chat-block hidden" id="debate-chat-block">
+      <ul class="chat-messages" id="chat-messages"></ul>
+      <form class="chat-form" onsubmit="sendChatMessage(event)">
+        <input type="text" id="chat-input" placeholder="Écris un message..." maxlength="120" autocomplete="off">
+        <button type="submit" class="chat-send-btn">➤</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================
+     VUE 8 : VOTE
+     ============================================ -->
+<section id="view-voting" class="view">
+  <div class="wrap">
+    <p class="waiting-label" id="voting-progress">Manche 1 / 5 — Vote</p>
+    <h2 class="voting-title">Qui a choisi cette musique ?</h2>
+
+    <ul class="vote-list" id="vote-list"></ul>
+
+    <p class="field-hint center" id="voting-status"></p>
+  </div>
+</section>
+
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
