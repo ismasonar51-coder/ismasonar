@@ -6,7 +6,7 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, doc, setDoc, getDoc,
+  getFirestore, doc, setDoc, getDoc, updateDoc,
   collection, addDoc, onSnapshot, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -17,6 +17,11 @@ const db = getFirestore(app);
 let sameRoomValue = true;   // true = tous dans la même pièce
 let modeValue = "rounds";   // "rounds" ou "time"
 let unsubscribePlayers = null;
+let currentRoomCode = null;
+let currentPlayerId = null;
+let hostPlays = true;
+const pendingSongs = { host: [null, null], player: [null, null] };
+const MIN_PLAYERS = 3; // ajustable selon tes tests
 
 // ---------- Navigation entre vues ----------
 function showView(id){
@@ -91,12 +96,18 @@ async function handleCreateRoom(event){
     });
 
     // Le host apparaît aussi dans la liste des joueurs
-    await addDoc(collection(db, "rooms", code, "players"), {
+    const playerRef = await addDoc(collection(db, "rooms", code, "players"), {
       name: hostName,
       isHost: true,
+      isPlaying: true,
+      songs: [],
+      songsSubmitted: false,
       score: 0,
       joinedAt: serverTimestamp()
     });
+
+    currentRoomCode = code;
+    currentPlayerId = playerRef.id;
 
     document.getElementById("display-room-code").textContent = code;
     generateQRCode(code);
@@ -132,12 +143,18 @@ async function handleJoinRoom(event){
       return;
     }
 
-    await addDoc(collection(db, "rooms", code, "players"), {
+    const playerRef = await addDoc(collection(db, "rooms", code, "players"), {
       name: pseudo,
       isHost: false,
+      isPlaying: true,
+      songs: [],
+      songsSubmitted: false,
       score: 0,
       joinedAt: serverTimestamp()
     });
+
+    currentRoomCode = code;
+    currentPlayerId = playerRef.id;
 
     document.getElementById("display-join-code").textContent = code;
     listenPlayers(code, "player-player-list", "player-count-2");
@@ -160,16 +177,43 @@ function listenPlayers(code, listElementId, countElementId){
     listEl.innerHTML = "";
     countEl.textContent = `(${snapshot.size})`;
 
+    let readyCount = 0;
+    let totalCount = 0;
+
     snapshot.forEach(playerDoc => {
       const player = playerDoc.data();
+      totalCount++;
+      const isReady = player.songsSubmitted === true;
+      if(isReady) readyCount++;
+
       const li = document.createElement("li");
       li.innerHTML = `
-        <span class="dot"></span>
+        <span class="dot ${isReady ? "" : "pending"}"></span>
         <span>${escapeHtml(player.name)}</span>
-        ${player.isHost ? '<span class="host-tag">HOST</span>' : ""}
+        <span class="tags">
+          ${player.isHost ? '<span class="host-tag">HOST</span>' : ""}
+          ${isReady ? '<span class="ready-tag">🎵 prêt</span>' : ""}
+        </span>
       `;
       listEl.appendChild(li);
     });
+
+    // Le bouton "Lancer la partie" n'existe que côté host
+    const startBtn = document.getElementById("btn-start-game");
+    const startHint = document.getElementById("start-hint");
+    if(startBtn){
+      const allReady = totalCount > 0 && readyCount === totalCount;
+      const enoughPlayers = totalCount >= MIN_PLAYERS;
+      startBtn.disabled = !(allReady && enoughPlayers);
+
+      if(!enoughPlayers){
+        startHint.textContent = `Il faut au moins ${MIN_PLAYERS} joueurs (${totalCount}/${MIN_PLAYERS}).`;
+      } else if(!allReady){
+        startHint.textContent = `En attente des musiques : ${readyCount}/${totalCount} prêts.`;
+      } else {
+        startHint.textContent = "Tout le monde est prêt !";
+      }
+    }
   });
 }
 
@@ -178,6 +222,103 @@ function escapeHtml(str){
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ---------- Le host joue ou reste arbitre ----------
+function setHostPlays(value){
+  hostPlays = value;
+  document.querySelectorAll("#toggle-host-plays .toggle-option").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.value === String(value));
+  });
+  document.getElementById("songs-block-host").classList.toggle("hidden", !value);
+
+  if(currentPlayerId){
+    const updates = value
+      ? { isPlaying: true, songsSubmitted: false, songs: [] }
+      : { isPlaying: false, songsSubmitted: true, songs: [] };
+    updateDoc(doc(db, "rooms", currentRoomCode, "players", currentPlayerId), updates);
+  }
+}
+window.setHostPlays = setHostPlays;
+
+// ---------- Musiques : extraction d'ID YouTube ----------
+function extractYouTubeId(url){
+  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+  return match ? match[1] : null;
+}
+
+async function fetchYouTubeTitle(videoId){
+  const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+  if(!res.ok) throw new Error("Vidéo introuvable");
+  const data = await res.json();
+  return data.title;
+}
+
+async function handleSongInput(role, slot){
+  const input = document.getElementById(`song${slot}-input-${role}`);
+  const preview = document.getElementById(`song${slot}-preview-${role}`);
+  const url = input.value.trim();
+
+  if(!url){
+    preview.textContent = "";
+    preview.className = "song-preview";
+    pendingSongs[role][slot - 1] = null;
+    return;
+  }
+
+  const videoId = extractYouTubeId(url);
+  if(!videoId){
+    preview.textContent = "⚠️ Lien YouTube invalide";
+    preview.className = "song-preview error";
+    pendingSongs[role][slot - 1] = null;
+    return;
+  }
+
+  preview.textContent = "Chargement...";
+  preview.className = "song-preview";
+
+  try{
+    const title = await fetchYouTubeTitle(videoId);
+    preview.textContent = "✓ " + title;
+    preview.className = "song-preview valid";
+    pendingSongs[role][slot - 1] = { youtubeId: videoId, title };
+  } catch(err){
+    preview.textContent = "⚠️ Vidéo introuvable";
+    preview.className = "song-preview error";
+    pendingSongs[role][slot - 1] = null;
+  }
+}
+window.handleSongInput = handleSongInput;
+
+async function submitSongs(role){
+  const [song1, song2] = pendingSongs[role];
+  const statusEl = document.getElementById(`songs-status-${role}`);
+
+  if(!song1 || !song2){
+    statusEl.textContent = "Ajoute bien 2 musiques valides avant de valider.";
+    statusEl.style.color = "var(--danger)";
+    return;
+  }
+
+  try{
+    await updateDoc(doc(db, "rooms", currentRoomCode, "players", currentPlayerId), {
+      songs: [song1, song2],
+      songsSubmitted: true
+    });
+    statusEl.textContent = "✓ Musiques enregistrées !";
+    statusEl.style.color = "var(--teal)";
+  } catch(err){
+    console.error(err);
+    statusEl.textContent = "Erreur, réessaie.";
+    statusEl.style.color = "var(--danger)";
+  }
+}
+window.submitSongs = submitSongs;
+
+// ---------- Lancement de partie (placeholder, phase 2b) ----------
+function handleStartGame(){
+  alert("Bravo, tout le monde est prêt ! La logique de la partie (lecture des musiques, débat, vote, score) arrive dans la prochaine étape 🎶");
+}
+window.handleStartGame = handleStartGame;
 
 // ---------- QR Code ----------
 function generateQRCode(code){
