@@ -103,13 +103,35 @@
       <div id="qrcode-container" class="qrcode-container"></div>
     </div>
 
+    <div class="field">
+      <span class="field-label">Tu participes aussi au jeu ?</span>
+      <div class="toggle-group" id="toggle-host-plays">
+        <button type="button" class="toggle-option active" data-value="true" onclick="setHostPlays(true)">Oui, je joue aussi</button>
+        <button type="button" class="toggle-option" data-value="false" onclick="setHostPlays(false)">Non, arbitre uniquement</button>
+      </div>
+    </div>
+
+    <div class="songs-block" id="songs-block-host">
+      <h3 class="players-title">Tes musiques</h3>
+      <div class="song-field">
+        <input type="text" id="song1-input-host" placeholder="Colle un lien YouTube (musique 1)" onblur="handleSongInput('host', 1)">
+        <p class="song-preview" id="song1-preview-host"></p>
+      </div>
+      <div class="song-field">
+        <input type="text" id="song2-input-host" placeholder="Colle un lien YouTube (musique 2)" onblur="handleSongInput('host', 2)">
+        <p class="song-preview" id="song2-preview-host"></p>
+      </div>
+      <button type="button" class="btn-big btn-secondary" onclick="submitSongs('host')">Valider mes musiques</button>
+      <p class="field-hint" id="songs-status-host"></p>
+    </div>
+
     <h3 class="players-title">Joueurs connectés <span id="player-count">(0)</span></h3>
     <ul class="player-list" id="host-player-list"></ul>
 
-    <button class="btn-big btn-primary btn-submit" disabled title="La logique de jeu arrive en phase 2">
-      Lancer la partie (bientôt)
+    <button class="btn-big btn-primary btn-submit" id="btn-start-game" onclick="handleStartGame()" disabled>
+      Lancer la partie
     </button>
-    <p class="field-hint center">Le lancement de partie sera activé une fois la logique de jeu construite.</p>
+    <p class="field-hint center" id="start-hint">En attente que tout le monde valide ses musiques...</p>
   </div>
 </section>
 
@@ -143,6 +165,20 @@
   <div class="wrap">
     <p class="waiting-label">En attente du host...</p>
     <span class="room-code-small" id="display-join-code">------</span>
+
+    <div class="songs-block" id="songs-block-player">
+      <h3 class="players-title">Tes musiques</h3>
+      <div class="song-field">
+        <input type="text" id="song1-input-player" placeholder="Colle un lien YouTube (musique 1)" onblur="handleSongInput('player', 1)">
+        <p class="song-preview" id="song1-preview-player"></p>
+      </div>
+      <div class="song-field">
+        <input type="text" id="song2-input-player" placeholder="Colle un lien YouTube (musique 2)" onblur="handleSongInput('player', 2)">
+        <p class="song-preview" id="song2-preview-player"></p>
+      </div>
+      <button type="button" class="btn-big btn-secondary" onclick="submitSongs('player')">Valider mes musiques</button>
+      <p class="field-hint" id="songs-status-player"></p>
+    </div>
 
     <h3 class="players-title">Joueurs dans le salon <span id="player-count-2">(0)</span></h3>
     <ul class="player-list" id="player-player-list"></ul>
