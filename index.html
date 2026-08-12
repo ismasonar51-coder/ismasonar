@@ -103,6 +103,7 @@
       <span class="room-code-label">Code du salon</span>
       <span class="room-code" id="display-room-code">------</span>
       <div id="qrcode-container" class="qrcode-container"></div>
+      <button type="button" class="btn-big btn-secondary" id="copy-invite-btn" onclick="copyInviteLink()">🔗 Copier le lien d'invitation</button>
     </div>
 
     <button type="button" class="btn-big btn-secondary hidden" id="audio-warmup-host" onclick="handleAudioWarmup()">
@@ -150,7 +151,8 @@
     <h2>Rejoindre un salon</h2>
 
     <form id="form-join" onsubmit="handleJoinRoom(event)">
-      <label class="field">
+      <p class="field-hint hidden" id="join-invite-note"></p>
+      <label class="field" id="join-code-field">
         <span class="field-label">Code du salon</span>
         <input type="text" id="input-join-code" maxlength="6" placeholder="000000" required inputmode="numeric" class="code-input">
       </label>
