@@ -20,6 +20,8 @@
     </div>
     <p class="tagline">Devine qui a choisi la musique. Ne te fais pas démasquer.</p>
 
+    <p class="field-hint center hidden" id="kicked-message">⛔ Tu as été exclu du salon par le host.</p>
+
     <div class="home-actions">
       <button class="btn-big btn-primary" onclick="showView('view-create')">
         <span class="btn-icon">＋</span>
@@ -103,6 +105,10 @@
       <div id="qrcode-container" class="qrcode-container"></div>
     </div>
 
+    <button type="button" class="btn-big btn-secondary hidden" id="audio-warmup-host" onclick="handleAudioWarmup()">
+      🔊 Activer le son pour cette partie
+    </button>
+
     <div class="field">
       <span class="field-label">Tu participes aussi au jeu ?</span>
       <div class="toggle-group" id="toggle-host-plays">
@@ -166,6 +172,10 @@
     <p class="waiting-label">En attente du host...</p>
     <span class="room-code-small" id="display-join-code">------</span>
 
+    <button type="button" class="btn-big btn-secondary hidden" id="audio-warmup-player" onclick="handleAudioWarmup()">
+      🔊 Activer le son pour cette partie
+    </button>
+
     <div class="songs-block" id="songs-block-player">
       <h3 class="players-title">Tes musiques</h3>
       <div class="song-field">
@@ -180,12 +190,11 @@
       <p class="field-hint" id="songs-status-player"></p>
     </div>
 
-    <h3 class="players-title">Joueurs dans le salon <span id="player-count-2">(0)</span></h3>
-    <ul class="player-list" id="player-player-list"></ul>
+    <h3 class="players-title">Salon <span id="player-count-2">(0)</span></h3>
+    <ul class="player-list hidden" id="player-player-list"></ul>
+    <p class="field-hint" id="player-summary"></p>
   </div>
 </section>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
 <!-- ============================================
      VUE 6 : MANCHE EN COURS
@@ -248,6 +257,17 @@
   </div>
 </section>
 
+<!-- ============================================
+     POPUP GÉNÉRIQUE (remplace confirm()/alert())
+     ============================================ -->
+<div class="modal-overlay hidden" id="modal-overlay">
+  <div class="modal-box">
+    <p class="modal-message" id="modal-message"></p>
+    <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
