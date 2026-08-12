@@ -1,6 +1,5 @@
 // =====================================================================
-// ISMASONAR — Logique complète : lobby, musiques, manches, débat, vote
-// Phase 2b : logique de jeu (lecture, débat, vote) — scoring à venir
+// ISMASONAR — Lobby, musiques, manches, débat, vote
 // =====================================================================
 
 import { firebaseConfig } from "./firebase-config.js";
@@ -24,9 +23,11 @@ let currentPlayerId = null;
 let hostPlays = true;
 let currentPlayersCache = [];
 let currentRoundIndexCache = 0;
-let lastRenderedPhase = null; // évite de ré-initialiser une vue à chaque micro-mise à jour Firestore
+let lastRenderedPhase = null;
+let hasSeenSelfInRoom = false; // pour détecter une exclusion (et pas un simple délai de chargement)
 const pendingSongs = { host: [null, null], player: [null, null] };
 const MIN_PLAYERS = 3; // ajustable selon tes tests
+const WARMUP_VIDEO_ID = "jNQXAC9IVRw"; // vidéo courte et fiable, sert juste à "débloquer" le son
 
 // ---------- Minuteurs & audio ----------
 let roundTimerInterval = null;
@@ -44,10 +45,45 @@ function loadYouTubeAPI(){
 }
 loadYouTubeAPI();
 
-// ---------- Navigation entre vues ----------
+// ---------- Popup générique (remplace confirm()/alert()) ----------
+function showModal({ message, confirmLabel, cancelLabel, danger }){
+  return new Promise(resolve => {
+    const overlay = document.getElementById("modal-overlay");
+    document.getElementById("modal-message").textContent = message;
+    const actions = document.getElementById("modal-actions");
+    actions.innerHTML = "";
+
+    if(cancelLabel){
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn-big btn-secondary";
+      cancelBtn.textContent = cancelLabel;
+      cancelBtn.onclick = () => { overlay.classList.remove("visible"); resolve(false); };
+      actions.appendChild(cancelBtn);
+    }
+
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = danger ? "btn-big btn-danger" : "btn-big btn-primary";
+    okBtn.textContent = confirmLabel || "OK";
+    okBtn.onclick = () => { overlay.classList.remove("visible"); resolve(true); };
+    actions.appendChild(okBtn);
+
+    overlay.classList.remove("hidden");
+    requestAnimationFrame(() => overlay.classList.add("visible"));
+  });
+}
+
+function notify(message){
+  showModal({ message, confirmLabel: "OK" });
+}
+
+// ---------- Navigation entre vues (avec fondu) ----------
 function showView(id){
-  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
-  document.getElementById(id).classList.add("active");
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("active", "visible"));
+  const target = document.getElementById(id);
+  target.classList.add("active");
+  requestAnimationFrame(() => target.classList.add("visible"));
 }
 window.showView = showView;
 
@@ -86,6 +122,36 @@ async function generateUniqueRoomCode(){
     if(!snap.exists()) return code;
   }
   throw new Error("Impossible de générer un code de salon, réessaie.");
+}
+
+// ---------- Activation du son (à faire une fois, dans le lobby) ----------
+async function handleAudioWarmup(){
+  await ytApiReadyPromise;
+  if(!ytPlayer){
+    ytPlayer = new YT.Player("yt-player-container", {
+      height: "1",
+      width: "1",
+      videoId: WARMUP_VIDEO_ID,
+      playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0 },
+      events: {
+        onReady: e => {
+          e.target.mute();
+          e.target.playVideo();
+          setTimeout(() => e.target.pauseVideo(), 400);
+        }
+      }
+    });
+  }
+  audioUnlocked = true;
+  document.getElementById("audio-warmup-host").classList.add("hidden");
+  document.getElementById("audio-warmup-player").classList.add("hidden");
+}
+window.handleAudioWarmup = handleAudioWarmup;
+
+function maybeShowAudioWarmup(sameRoom, elementId){
+  if(!sameRoom && !audioUnlocked){
+    document.getElementById(elementId).classList.remove("hidden");
+  }
 }
 
 // ---------- Création d'un salon (host) ----------
@@ -128,15 +194,17 @@ async function handleCreateRoom(event){
 
     currentRoomCode = code;
     currentPlayerId = playerRef.id;
+    hasSeenSelfInRoom = false;
 
     document.getElementById("display-room-code").textContent = code;
     generateQRCode(code);
+    maybeShowAudioWarmup(sameRoomValue, "audio-warmup-host");
     listenPlayers(code, "host-player-list", "player-count", true);
     listenRoomStatus(code, true, sameRoomValue);
     showView("view-host-lobby");
   } catch(err){
     console.error(err);
-    alert("Erreur lors de la création du salon : " + err.message);
+    notify("Erreur lors de la création du salon : " + err.message);
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = "Créer le salon";
@@ -185,8 +253,10 @@ async function handleJoinRoom(event){
 
     currentRoomCode = code;
     currentPlayerId = playerRef.id;
+    hasSeenSelfInRoom = false;
 
     document.getElementById("display-join-code").textContent = code;
+    maybeShowAudioWarmup(roomSnap.data().settings.sameRoom, "audio-warmup-player");
     listenPlayers(code, "player-player-list", "player-count-2", false);
     listenRoomStatus(code, false, roomSnap.data().settings.sameRoom);
     showView("view-player-lobby");
@@ -203,33 +273,50 @@ function listenPlayers(code, listElementId, countElementId, isHostView){
 
   const listEl = document.getElementById(listElementId);
   const countEl = document.getElementById(countElementId);
+  const summaryEl = document.getElementById("player-summary");
 
   unsubscribePlayers = onSnapshot(collection(db, "rooms", code, "players"), snapshot => {
     currentPlayersCache = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
-    listEl.innerHTML = "";
+    // Détection d'exclusion (le joueur n'est plus dans la liste alors qu'il y était)
+    if(!isHostView && currentPlayerId){
+      const stillHere = currentPlayersCache.some(p => p.id === currentPlayerId);
+      if(stillHere){
+        hasSeenSelfInRoom = true;
+      } else if(hasSeenSelfInRoom){
+        handleKicked();
+        return;
+      }
+    }
+
     countEl.textContent = `(${snapshot.size})`;
 
     let readyCount = 0;
-    let totalCount = 0;
+    const totalCount = currentPlayersCache.length;
 
-    currentPlayersCache.forEach(player => {
-      totalCount++;
-      const isReady = player.songsSubmitted === true;
-      if(isReady) readyCount++;
+    if(isHostView){
+      listEl.innerHTML = "";
+      currentPlayersCache.forEach(player => {
+        const isReady = player.songsSubmitted === true;
+        if(isReady) readyCount++;
 
-      const li = document.createElement("li");
-      li.innerHTML = `
-        <span class="dot ${isReady ? "" : "pending"}"></span>
-        <span>${escapeHtml(player.name)}</span>
-        <span class="tags">
-          ${player.isHost ? '<span class="host-tag">HOST</span>' : ""}
-          ${isReady ? '<span class="ready-tag">🎵 prêt</span>' : ""}
-          ${isHostView && !player.isHost ? `<button type="button" class="kick-btn" onclick="kickPlayer('${player.id}', '${escapeHtml(player.name)}')" title="Exclure ce joueur">✕</button>` : ""}
-        </span>
-      `;
-      listEl.appendChild(li);
-    });
+        const li = document.createElement("li");
+        li.innerHTML = `
+          <span class="dot ${isReady ? "" : "pending"}"></span>
+          <span>${escapeHtml(player.name)}</span>
+          <span class="tags">
+            ${player.isHost ? '<span class="host-tag">HOST</span>' : ""}
+            ${isReady ? '<span class="ready-tag">🎵 prêt</span>' : ""}
+            ${!player.isHost ? `<button type="button" class="kick-btn" onclick="kickPlayer('${player.id}', '${escapeHtml(player.name)}')" title="Exclure ce joueur">✕</button>` : ""}
+          </span>
+        `;
+        listEl.appendChild(li);
+      });
+    } else {
+      // Vue joueur : pas de liste de noms, juste des chiffres
+      readyCount = currentPlayersCache.filter(p => p.songsSubmitted === true).length;
+      if(summaryEl) summaryEl.textContent = `${totalCount} joueur${totalCount > 1 ? "s" : ""} connecté${totalCount > 1 ? "s" : ""} · ${readyCount} prêt${readyCount > 1 ? "s" : ""}`;
+    }
 
     const startBtn = document.getElementById("btn-start-game");
     const startHint = document.getElementById("start-hint");
@@ -249,15 +336,34 @@ function listenPlayers(code, listElementId, countElementId, isHostView){
 }
 
 async function kickPlayer(playerId, playerName){
-  if(!confirm(`Exclure ${playerName} du salon ?`)) return;
+  const confirmed = await showModal({
+    message: `Exclure ${playerName} du salon ?`,
+    confirmLabel: "Exclure",
+    cancelLabel: "Annuler",
+    danger: true
+  });
+  if(!confirmed) return;
+
   try{
     await deleteDoc(doc(db, "rooms", currentRoomCode, "players", playerId));
   } catch(err){
     console.error(err);
-    alert("Impossible d'exclure ce joueur, réessaie.");
+    notify("Impossible d'exclure ce joueur, réessaie.");
   }
 }
 window.kickPlayer = kickPlayer;
+
+function handleKicked(){
+  if(unsubscribePlayers) unsubscribePlayers();
+  if(unsubscribeRoom) unsubscribeRoom();
+  if(unsubscribeChat) unsubscribeChat();
+  currentRoomCode = null;
+  currentPlayerId = null;
+  hasSeenSelfInRoom = false;
+
+  showView("view-home");
+  document.getElementById("kicked-message").classList.remove("hidden");
+}
 
 function escapeHtml(str){
   const div = document.createElement("div");
@@ -315,6 +421,16 @@ async function handleSongInput(role, slot){
     return;
   }
 
+  // Vérifie que ce n'est pas la même musique que l'autre champ
+  const otherSlot = slot === 1 ? 2 : 1;
+  const otherSong = pendingSongs[role][otherSlot - 1];
+  if(otherSong && otherSong.youtubeId === videoId){
+    preview.textContent = "⚠️ Tu as déjà mis cette musique dans l'autre champ";
+    preview.className = "song-preview error";
+    pendingSongs[role][slot - 1] = null;
+    return;
+  }
+
   preview.textContent = "Chargement...";
   preview.className = "song-preview";
 
@@ -336,7 +452,12 @@ async function submitSongs(role){
   const statusEl = document.getElementById(`songs-status-${role}`);
 
   if(!song1 || !song2){
-    statusEl.textContent = "Ajoute bien 2 musiques valides avant de valider.";
+    statusEl.textContent = "Ajoute bien 2 musiques valides et différentes avant de valider.";
+    statusEl.style.color = "var(--danger)";
+    return;
+  }
+  if(song1.youtubeId === song2.youtubeId){
+    statusEl.textContent = "Les 2 musiques doivent être différentes.";
     statusEl.style.color = "var(--danger)";
     return;
   }
@@ -396,7 +517,7 @@ async function handleStartGame(){
   const startBtn = document.getElementById("btn-start-game");
   startBtn.disabled = true;
   startBtn.textContent = "Lancement...";
-  audioUnlocked = true;
+  audioUnlocked = true; // le clic du host sert de geste utilisateur
 
   try{
     const roomSnap = await getDoc(doc(db, "rooms", currentRoomCode));
@@ -421,7 +542,7 @@ async function handleStartGame(){
     });
   } catch(err){
     console.error(err);
-    alert("Erreur au lancement de la partie, réessaie.");
+    notify("Erreur au lancement de la partie, réessaie.");
     startBtn.disabled = false;
     startBtn.textContent = "Lancer la partie";
   }
@@ -454,7 +575,7 @@ function renderRoundState(room, isHost, sameRoom){
   } else if(room.roundPhase === "voting"){
     renderVotingPhase(room, isHost);
   } else if(room.roundPhase === "results"){
-    if(isNewPhase) enterResultsPlaceholder(room);
+    if(isNewPhase) enterResultsPlaceholder();
   }
 }
 
@@ -466,10 +587,10 @@ function enterSongPhase(room, isHost, sameRoom){
   document.getElementById("round-progress").textContent =
     `Manche ${room.currentRoundIndex + 1} / ${room.roundOrder.length}`;
   document.getElementById("round-ended-message").classList.add("hidden");
+  document.getElementById("round-unlock-btn").classList.add("hidden");
 
   const hostOnlyCaption = document.getElementById("round-audio-host-only");
   const playerCaption = document.getElementById("round-audio-player");
-  const unlockBtn = document.getElementById("round-unlock-btn");
 
   const onTimerEnd = () => {
     if(ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
@@ -479,25 +600,23 @@ function enterSongPhase(room, isHost, sameRoom){
   if(sameRoom && !isHost){
     hostOnlyCaption.classList.remove("hidden");
     playerCaption.classList.add("hidden");
-    unlockBtn.classList.add("hidden");
     startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
   } else {
     hostOnlyCaption.classList.add("hidden");
     playerCaption.classList.remove("hidden");
 
-    if(!audioUnlocked){
-      unlockBtn.classList.remove("hidden");
-      unlockBtn.onclick = () => {
-        audioUnlocked = true;
-        unlockBtn.classList.add("hidden");
-        playRoundSong(round.youtubeId);
-        startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
-      };
-    } else {
-      unlockBtn.classList.add("hidden");
+    if(audioUnlocked){
       playRoundSong(round.youtubeId);
-      startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
+    } else {
+      // Filet de sécurité si le son n'a pas été activé dans le lobby
+      document.getElementById("round-unlock-btn").classList.remove("hidden");
+      document.getElementById("round-unlock-btn").onclick = () => {
+        audioUnlocked = true;
+        document.getElementById("round-unlock-btn").classList.add("hidden");
+        playRoundSong(round.youtubeId);
+      };
     }
+    startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
   }
 }
 
@@ -615,7 +734,7 @@ async function submitVote(votedForId){
     });
   } catch(err){
     console.error(err);
-    alert("Erreur lors du vote, réessaie.");
+    notify("Erreur lors du vote, réessaie.");
   }
 }
 window.submitVote = submitVote;
@@ -658,6 +777,7 @@ function startCountdown(startTimestamp, elementId, onExpire){
 async function playRoundSong(videoId){
   await ytApiReadyPromise;
   if(ytPlayer){
+    ytPlayer.unMute();
     ytPlayer.loadVideoById(videoId);
     return;
   }
@@ -666,7 +786,7 @@ async function playRoundSong(videoId){
     width: "1",
     videoId: videoId,
     playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0 },
-    events: { onReady: e => e.target.playVideo() }
+    events: { onReady: e => { e.target.unMute(); e.target.playVideo(); } }
   });
 }
 
