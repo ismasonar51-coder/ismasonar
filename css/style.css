@@ -1,13 +1,12 @@
 :root{
-  /* Charte Isma dérivée : base dark navy habituelle + accents plus vifs pour l'ambiance jeu */
   --bg: #0c0d18;
   --bg-elevated: #151729;
   --bg-card: #1b1e35;
   --border: #2b2f4a;
 
-  --amber: #f5a623;       /* accent historique Isma */
-  --violet: #8b6cff;      /* accent "jeu / mystère" */
-  --teal: #34d1bf;        /* accent succès / confirmation */
+  --amber: #f5a623;
+  --violet: #8b6cff;
+  --teal: #34d1bf;
   --danger: #ff5c72;
 
   --text: #f1f2f8;
@@ -31,8 +30,20 @@ body{
   line-height: 1.5;
 }
 
-.view{ display: none; min-height: 100vh; align-items: center; justify-content: center; padding: 32px 20px; }
+/* Classe utilitaire générique — DOIT rester générale (pas seulement .field.hidden) */
+.hidden{ display: none !important; }
+
+.view{
+  display: none;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
 .view.active{ display: flex; }
+.view.active.visible{ opacity: 1; }
 .wrap{ width: 100%; max-width: 420px; }
 
 /* ---------- Logo / accueil ---------- */
@@ -51,10 +62,10 @@ body{
   text-align: center;
   color: var(--text-dim);
   font-size: 15px;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
 }
 
-.home-actions{ display: flex; flex-direction: column; gap: 14px; }
+.home-actions{ display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
 
 /* ---------- Boutons ---------- */
 .btn-big{
@@ -84,8 +95,15 @@ body{
   border: 1px solid var(--border);
 }
 .btn-secondary:hover{ border-color: var(--violet); }
+.btn-danger{
+  background: var(--danger);
+  color: #2a0006;
+}
+.btn-danger:hover{ box-shadow: 0 8px 24px rgba(255,92,114,0.25); }
 .btn-big:disabled{ opacity: 0.4; cursor: not-allowed; }
 .btn-icon{ font-size: 18px; }
+.btn-big.audio-warmup{ margin-bottom: 20px; }
+#audio-warmup-host, #audio-warmup-player{ margin-bottom: 20px; }
 
 .btn-back{
   background: none;
@@ -118,7 +136,6 @@ h2{
 .field-hint{ font-size: 12.5px; color: var(--text-faint); margin-top: 8px; }
 .field-hint.center{ text-align: center; margin-top: 14px; }
 .field-error{ color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 18px; }
-.field.hidden{ display: none; }
 
 input[type="text"], input[type="number"], select{
   width: 100%;
@@ -168,7 +185,7 @@ input:focus, select:focus{ outline: none; border-color: var(--violet); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 28px;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 .room-code-label{
   display: block;
@@ -206,7 +223,7 @@ input:focus, select:focus{ outline: none; border-color: var(--violet); }
   font-weight: 700;
   letter-spacing: 0.15em;
   color: var(--amber);
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 
 .players-title{
@@ -234,6 +251,7 @@ input:focus, select:focus{ outline: none; border-color: var(--violet); }
   background: var(--teal);
   flex-shrink: 0;
 }
+.player-list li .dot.pending{ background: var(--text-faint); }
 .player-list li .tags{
   margin-left: auto;
   display: flex;
@@ -274,6 +292,14 @@ input:focus, select:focus{ outline: none; border-color: var(--violet); }
   border-color: var(--danger);
   color: var(--danger);
 }
+
+/* ---------- Soumission des musiques ---------- */
+.songs-block{ margin-bottom: 28px; }
+.song-field{ margin-bottom: 12px; }
+.song-field input{ margin-bottom: 6px; }
+.song-preview{ font-size: 12.5px; color: var(--text-faint); min-height: 16px; }
+.song-preview.valid{ color: var(--teal); }
+.song-preview.error{ color: var(--danger); }
 
 /* ---------- Manche en cours ---------- */
 .round-stage{ text-align: center; }
@@ -366,12 +392,34 @@ input:focus, select:focus{ outline: none; border-color: var(--violet); }
   background: rgba(139,108,255,0.1);
   transform: translateY(-1px);
 }
-.player-list li .dot.pending{ background: var(--text-faint); }
 
-/* ---------- Soumission des musiques ---------- */
-.songs-block{ margin-bottom: 28px; }
-.song-field{ margin-bottom: 12px; }
-.song-field input{ margin-bottom: 6px; }
-.song-preview{ font-size: 12.5px; color: var(--text-faint); min-height: 16px; }
-.song-preview.valid{ color: var(--teal); }
-.song-preview.error{ color: var(--danger); }
+/* ---------- Popup générique (remplace confirm/alert) ---------- */
+.modal-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(6,7,14,0.72);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.modal-overlay.visible{ opacity: 1; pointer-events: auto; }
+.modal-box{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 340px;
+  width: calc(100% - 48px);
+  text-align: center;
+  transform: scale(0.96);
+  transition: transform 0.2s ease;
+}
+.modal-overlay.visible .modal-box{ transform: scale(1); }
+.modal-message{ font-size: 15px; margin-bottom: 20px; line-height: 1.5; }
+.modal-actions{ display: flex; gap: 10px; }
+.modal-actions .btn-big{ padding: 13px 16px; font-size: 14px; }
