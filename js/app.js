@@ -600,7 +600,7 @@ function enterSongPhase(room, isHost, sameRoom){
   if(sameRoom && !isHost){
     hostOnlyCaption.classList.remove("hidden");
     playerCaption.classList.add("hidden");
-    startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
+    startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd, true);
   } else {
     hostOnlyCaption.classList.add("hidden");
     playerCaption.classList.remove("hidden");
@@ -616,7 +616,7 @@ function enterSongPhase(room, isHost, sameRoom){
         playRoundSong(round.youtubeId);
       };
     }
-    startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd);
+    startCountdown(room.phaseStartedAt, "round-countdown", onTimerEnd, true);
   }
 }
 
@@ -646,7 +646,7 @@ function enterDebatePhase(room, isHost, sameRoom){
 
   startCountdown(room.phaseStartedAt, "debate-countdown", () => {
     if(isHost) advanceToVoting();
-  });
+  }, false);
 }
 
 async function advanceToVoting(){
@@ -753,17 +753,23 @@ function enterResultsPlaceholder(){
     "🚧 Tous les votes sont reçus ! Le calcul des scores et l'écran de résultats arrivent dans la prochaine étape.";
 }
 
-// ---------- Minuteur générique (30s) ----------
-function startCountdown(startTimestamp, elementId, onExpire){
+// ---------- Minuteur générique (30s), avec fondu audio optionnel en fin de musique ----------
+function startCountdown(startTimestamp, elementId, onExpire, withAudioFade){
   clearInterval(roundTimerInterval);
   const startMs = startTimestamp && startTimestamp.toMillis ? startTimestamp.toMillis() : Date.now();
   const countdownEl = document.getElementById(elementId);
   let expired = false;
+  let fadingStarted = false;
 
   roundTimerInterval = setInterval(() => {
     const elapsed = (Date.now() - startMs) / 1000;
     const remaining = Math.max(0, Math.ceil(30 - elapsed));
     countdownEl.textContent = remaining;
+
+    if(withAudioFade && !fadingStarted && remaining <= 1 && ytPlayer && ytPlayer.setVolume){
+      fadingStarted = true;
+      fadeOutAudio();
+    }
 
     if(remaining <= 0 && !expired){
       expired = true;
@@ -773,11 +779,25 @@ function startCountdown(startTimestamp, elementId, onExpire){
   }, 250);
 }
 
+function fadeOutAudio(){
+  if(!ytPlayer || !ytPlayer.setVolume) return;
+  let vol = 100;
+  const fadeInterval = setInterval(() => {
+    vol -= 20;
+    if(vol <= 0){
+      vol = 0;
+      clearInterval(fadeInterval);
+    }
+    try{ ytPlayer.setVolume(vol); } catch(err){ clearInterval(fadeInterval); }
+  }, 100);
+}
+
 // ---------- Lecture audio (vidéo cachée, YouTube IFrame API) ----------
 async function playRoundSong(videoId){
   await ytApiReadyPromise;
   if(ytPlayer){
     ytPlayer.unMute();
+    ytPlayer.setVolume(100);
     ytPlayer.loadVideoById(videoId);
     return;
   }
@@ -786,8 +806,38 @@ async function playRoundSong(videoId){
     width: "1",
     videoId: videoId,
     playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0 },
-    events: { onReady: e => { e.target.unMute(); e.target.playVideo(); } }
+    events: { onReady: e => { e.target.unMute(); e.target.setVolume(100); e.target.playVideo(); } }
   });
+}
+
+// ---------- Lien d'invitation ----------
+function buildInviteUrl(code){
+  return `${window.location.origin}${window.location.pathname}?join=${code}`;
+}
+
+function copyInviteLink(){
+  const url = buildInviteUrl(currentRoomCode);
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById("copy-invite-btn");
+    const original = btn.textContent;
+    btn.textContent = "✓ Lien copié !";
+    setTimeout(() => { btn.textContent = original; }, 2000);
+  }).catch(() => notify("Impossible de copier automatiquement. Voici le lien :\n" + url));
+}
+window.copyInviteLink = copyInviteLink;
+
+function checkInviteLink(){
+  const params = new URLSearchParams(window.location.search);
+  const joinCode = params.get("join");
+  if(!joinCode) return false;
+
+  document.getElementById("input-join-code").value = joinCode;
+  document.getElementById("join-code-field").classList.add("hidden");
+  const note = document.getElementById("join-invite-note");
+  note.textContent = `Tu rejoins le salon ${joinCode} — entre juste ton pseudo.`;
+  note.classList.remove("hidden");
+  showView("view-join");
+  return true;
 }
 
 // ---------- QR Code ----------
@@ -796,7 +846,7 @@ function generateQRCode(code){
   container.innerHTML = "";
   // eslint-disable-next-line no-undef
   new QRCode(container, {
-    text: code,
+    text: buildInviteUrl(code),
     width: 140,
     height: 140,
     colorDark: "#0c0d18",
@@ -807,3 +857,6 @@ function generateQRCode(code){
 // ---------- Init ----------
 setSameRoom(true);
 setMode("rounds");
+if(!checkInviteLink()){
+  showView("view-home");
+}
